@@ -40,7 +40,7 @@ def handle_client(conn, addr):
             
             # Проверка сообщения на безопасность
             if not is_safe_message(message):
-                print(f"Попытка инъекции команды от {addr}: {message}")
+                print(f"Попытка инъекции команды от {addr}")
                 conn.sendall("Ваше сообщение содержит запрещенные символы.".encode('utf-8'))
                 continue
             
