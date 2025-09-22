@@ -8,9 +8,9 @@ import socket
 logging.basicConfig(filename='server.log', level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-HOST = '64.188.68.161'  # Используем localhost для асинхронного сервера
+HOST = '127.0.0.1'
 PORT = 65432
-connections = {}  # Словарь для хранения подключенных клиентов по их адресам
+connections = {}  # {адрес: {'writer': writer, 'name': name}}
 lock = asyncio.Lock()
 
 def is_safe_message(message):
@@ -19,12 +19,22 @@ def is_safe_message(message):
 
 async def handle_client(reader, writer):
     addr = writer.get_extra_info('peername')
-    logging.info(f"Подключен новый клиент: {addr}")
-    
-    with await lock:
-        connections[addr] = writer
+    user_name = None
 
     try:
+        # Первое сообщение должно быть именем
+        data = await reader.read(1024)
+        if data:
+            message = data.decode('utf-8').strip()
+            if message.startswith("NAME:"):
+                user_name = message[5:]
+                with await lock:
+                    connections[addr] = {'writer': writer, 'name': user_name}
+                logging.info(f"Подключен новый клиент: {addr} с именем '{user_name}'")
+            else:
+                logging.warning(f"Клиент {addr} не отправил имя. Отключение.")
+                return
+
         while True:
             data = await reader.read(1024)
             if not data:
@@ -39,16 +49,16 @@ async def handle_client(reader, writer):
                 continue
             
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            formatted_message = f"[{timestamp}] {addr[0]}:{addr[1]}: {message}"
+            formatted_message = f"[{timestamp}] {user_name}: {message}"
             
             print(formatted_message)
             logging.info(formatted_message)
             
-            # Пересылаем сообщение всем, кроме отправителя
             with await lock:
-                for client_addr, client_writer in connections.items():
+                for client_addr, client_data in connections.items():
                     if client_addr != addr:
                         try:
+                            client_writer = client_data['writer']
                             client_writer.write(formatted_message.encode('utf-8'))
                             await client_writer.drain()
                         except (ConnectionResetError, BrokenPipeError):
@@ -60,13 +70,12 @@ async def handle_client(reader, writer):
         with await lock:
             if addr in connections:
                 del connections[addr]
-            logging.info(f"Клиент {addr} отключился.")
+            logging.info(f"Клиент {addr} с именем '{user_name}' отключился.")
         writer.close()
         await writer.wait_closed()
 
 async def run_server():
     server = await asyncio.start_server(handle_client, HOST, PORT, family=socket.AF_INET)
-    
     addr = server.sockets[0].getsockname()
     print(f"Сервер чата запущен на {addr}")
     logging.info("Сервер чата запущен.")

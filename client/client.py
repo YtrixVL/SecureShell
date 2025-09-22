@@ -3,7 +3,8 @@ import sys
 import time
 import socket
 
-HOST = '64.188.68.161'
+# Хост и порт для подключения к серверу
+HOST = '127.0.0.1'
 PORT = 65432
 
 async def receive_messages(reader):
@@ -24,9 +25,13 @@ async def receive_messages(reader):
     except Exception as e:
         print(f"\nПроизошла ошибка при получении сообщения: {e}")
 
-async def send_messages(writer):
+async def send_messages(writer, name):
     """Асинхронный поток для отправки сообщений на сервер."""
     try:
+        # Отправляем имя пользователя сразу после подключения
+        writer.write(f"NAME:{name}".encode('utf-8'))
+        await writer.drain()
+        
         while True:
             user_input = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
             
@@ -38,20 +43,21 @@ async def send_messages(writer):
             
             writer.write(user_input.encode('utf-8'))
             await writer.drain()
+            
     except Exception as e:
         print(f"Ошибка при отправке сообщения: {e}")
 
 async def run_client():
+    name = input("Введите ваше имя: ")
     try:
         reader, writer = await asyncio.open_connection(HOST, PORT)
         print("Подключен к чату. Начните общение.")
         print("Чтобы выйти, введите 'exit'.")
-        sys.stdout.write("")
+        sys.stdout.write(">> ")
         sys.stdout.flush()
 
-        # Запускаем два асинхронных потока одновременно
         receive_task = asyncio.create_task(receive_messages(reader))
-        send_task = asyncio.create_task(send_messages(writer))
+        send_task = asyncio.create_task(send_messages(writer, name))
         
         await asyncio.gather(receive_task, send_task)
 
