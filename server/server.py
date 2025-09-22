@@ -53,8 +53,6 @@ async def handle_client(reader, writer):
             
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             formatted_message = f"[{timestamp}] {user_name}: {message}"
-            
-            print(formatted_message)
             logging.info(formatted_message)
             
             with await lock:
