@@ -6,31 +6,45 @@ import os
 HOST = '64.188.68.161'
 PORT = 65432
 
+# Глобальная переменная для хранения текущего ввода
+current_input = ""
+input_lock = threading.Lock()
+
 def receive_messages(s):
     """Поток для приёма сообщений от сервера."""
+    global current_input
     while True:
         try:
             data = s.recv(1024)
             if not data:
-                print("Сервер отключен.")
+                print("\nСервер отключен.")
                 break
             
             message = data.decode('utf-8')
             
-            # Очистка текущей строки и вывод сообщения
-            sys.stdout.write('\r' + ' ' * len(sys.stdout.readline()) + '\r')
-            sys.stdout.write(f"\r{message}\n")
-            
-            # Перерисовка приглашения для ввода
-            sys.stdout.write(">> ")
-            sys.stdout.flush()
+            with input_lock:
+                # Очистка текущей строки ввода
+                sys.stdout.write('\r' + ' ' * (len(current_input) + 3) + '\r')
+                
+                # Вывод нового сообщения от сервера
+                sys.stdout.write(f"{message}\n")
+                
+                # Восстановление приглашения и текущего ввода
+                sys.stdout.write(f">> {current_input}")
+                sys.stdout.flush()
         
         except (ConnectionResetError, BrokenPipeError):
-            print("Соединение с сервером потеряно.")
+            print("\nСоединение с сервером потеряно.")
             break
+        except Exception as e:
+            print(f"Произошла ошибка: {e}")
+            break
+
     s.close()
+    os._exit(0) # Завершает программу
 
 def run_client():
+    global current_input
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
             s.connect((HOST, PORT))
@@ -42,10 +56,33 @@ def run_client():
             receive_thread.start()
 
             while True:
-                message = input(">> ") 
-                if message.lower() == 'exit':
+                with input_lock:
+                    current_input = ""
+                
+                sys.stdout.write(">> ")
+                sys.stdout.flush()
+
+                # Чтение ввода посимвольно для обновления current_input
+                while True:
+                    char = sys.stdin.read(1)
+                    with input_lock:
+                        if char == '\n':
+                            break
+                        if char == '\x7f': # Backspace
+                            current_input = current_input[:-1]
+                            sys.stdout.write('\r' + ' ' * (len(current_input) + 3) + '\r')
+                            sys.stdout.write(f">> {current_input}")
+                            sys.stdout.flush()
+                        else:
+                            current_input += char
+                            sys.stdout.write(char)
+                            sys.stdout.flush()
+
+                message_to_send = current_input.strip()
+
+                if message_to_send.lower() == 'exit':
                     break
-                s.sendall(message.encode('utf-8'))
+                s.sendall(message_to_send.encode('utf-8'))
 
         except ConnectionRefusedError:
             print("Ошибка: Не удалось подключиться к серверу. Убедитесь, что сервер запущен.")
