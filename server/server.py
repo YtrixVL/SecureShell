@@ -3,10 +3,13 @@ import datetime
 import logging
 import re
 import socket
+import sys
 
-# Настройка логирования
-logging.basicConfig(filename='server.log', level=logging.INFO,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
 HOST = '64.188.68.161'
 PORT = 65432

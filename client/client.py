@@ -17,7 +17,7 @@ async def receive_messages(reader):
                 break
             
             message = data.decode('utf-8', errors='replace')
-            sys.stdout.write(f"\r{message}\n>> ")
+            sys.stdout.write(f"\r{message}\n")
             sys.stdout.flush()
 
     except asyncio.exceptions.IncompleteReadError:
@@ -28,7 +28,6 @@ async def receive_messages(reader):
 async def send_messages(writer, name):
     """Асинхронный поток для отправки сообщений на сервер."""
     try:
-        # Отправляем имя пользователя сразу после подключения
         writer.write(f"NAME:{name}".encode('utf-8'))
         await writer.drain()
         
@@ -53,7 +52,7 @@ async def run_client():
         reader, writer = await asyncio.open_connection(HOST, PORT)
         print("Подключен к чату. Начните общение.")
         print("Чтобы выйти, введите 'exit'.")
-        sys.stdout.write(">> ")
+        sys.stdout.write("")
         sys.stdout.flush()
 
         receive_task = asyncio.create_task(receive_messages(reader))
