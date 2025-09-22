@@ -6,7 +6,7 @@ import uuid
 # --- Клиентская сторона ---
 # Роль клиента — отправлять и получать сообщения, используя общий секрет.
 
-SERVER_HOST = '127.0.0.1'
+SERVER_HOST = '64.188.68.161'
 SERVER_PORT = 65432
 
 def listen_for_messages(secret):
