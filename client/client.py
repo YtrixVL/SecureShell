@@ -1,96 +1,64 @@
-import socket
-import threading
+import asyncio
 import sys
-import os
 import time
+import socket
 
 HOST = '64.188.68.161'
 PORT = 65432
 
-print_lock = threading.Lock()
-is_connected = False
-
-def receive_messages(s):
-    """Поток для приёма сообщений от сервера."""
-    global is_connected
-    while is_connected:
-        try:
-            data = s.recv(1024)
+async def receive_messages(reader):
+    """Асинхронный поток для приёма сообщений от сервера."""
+    try:
+        while True:
+            data = await reader.read(1024)
             if not data:
-                with print_lock:
-                    print("\nСервер отключился. Попытка переподключения...")
-                is_connected = False
+                print("\nСервер отключился.")
                 break
             
-            message = data.decode('utf-8')
+            message = data.decode('utf-8', errors='replace')
+            sys.stdout.write(f"\r{message}\n>> ")
+            sys.stdout.flush()
+
+    except asyncio.exceptions.IncompleteReadError:
+        pass
+    except Exception as e:
+        print(f"\nПроизошла ошибка при получении сообщения: {e}")
+
+async def send_messages(writer):
+    """Асинхронный поток для отправки сообщений на сервер."""
+    try:
+        while True:
+            user_input = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
             
-            with print_lock:
-                sys.stdout.write(f"\r{message}\n>> ")
-                sys.stdout.flush()
-
-        except (ConnectionResetError, BrokenPipeError):
-            with print_lock:
-                print("\nСоединение с сервером потеряно. Попытка переподключения...")
-            is_connected = False
-            break
-        except Exception as e:
-            with print_lock:
-                print(f"\nПроизошла ошибка: {e}. Попытка переподключения...")
-            is_connected = False
-            break
-
-def run_client():
-    global is_connected
-    
-    while True:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        try:
-            with print_lock:
-                print("Попытка подключения к серверу...")
-            s.connect((HOST, PORT))
-            is_connected = True
-            with print_lock:
-                print("Подключен к чату. Начните общение.")
-                print("Чтобы выйти, введите 'exit'.")
-
-            receive_thread = threading.Thread(target=receive_messages, args=(s,))
-            receive_thread.daemon = True
-            receive_thread.start()
-
-            while is_connected:
-                with print_lock:
-                    user_input = input(">> ")
-                
-                if user_input.lower() == 'exit':
-                    is_connected = False
-                    break
-                
-                s.sendall(user_input.encode('utf-8'))
-
-        except ConnectionRefusedError:
-            with print_lock:
-                print("Ошибка: Не удалось подключиться к серверу. Повторная попытка через 5 секунд...")
-            time.sleep(5)
-            continue
-        except Exception as e:
-            with print_lock:
-                print(f"Критическая ошибка: {e}. Попытка переподключения...")
-            is_connected = False
-            s.close()
-            time.sleep(5)
-            continue
-
-        finally:
-            s.close()
-        
-        # Если is_connected стал False, выходим из внутреннего while и пытаемся переподключиться
-        if not is_connected:
-            with print_lock:
+            if user_input.lower().strip() == 'exit':
                 print("Отключение от чата.")
-            time.sleep(5) # Ждём перед попыткой переподключения
-            continue
+                writer.close()
+                await writer.wait_closed()
+                break
+            
+            writer.write(user_input.encode('utf-8'))
+            await writer.drain()
+    except Exception as e:
+        print(f"Ошибка при отправке сообщения: {e}")
+
+async def run_client():
+    try:
+        reader, writer = await asyncio.open_connection(HOST, PORT)
+        print("Подключен к чату. Начните общение.")
+        print("Чтобы выйти, введите 'exit'.")
+        sys.stdout.write("")
+        sys.stdout.flush()
+
+        # Запускаем два асинхронных потока одновременно
+        receive_task = asyncio.create_task(receive_messages(reader))
+        send_task = asyncio.create_task(send_messages(writer))
         
-        break # Выход из внешнего цикла при вводе 'exit'
+        await asyncio.gather(receive_task, send_task)
+
+    except ConnectionRefusedError:
+        print("Ошибка: Не удалось подключиться к серверу. Убедитесь, что сервер запущен.")
+    except Exception as e:
+        print(f"Произошла критическая ошибка: {e}")
 
 if __name__ == "__main__":
-    run_client()
+    asyncio.run(run_client())

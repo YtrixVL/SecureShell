@@ -1,91 +1,79 @@
-import socket
-import threading
+import asyncio
 import datetime
 import logging
 import re
+import socket
 
 # Настройка логирования
-logging.basicConfig(filename='server.log', level=logging.ERROR,
+logging.basicConfig(filename='server.log', level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Хост и порт для сервера
-HOST = '64.188.68.161'
+HOST = '64.188.68.161'  # Используем localhost для асинхронного сервера
 PORT = 65432
-connections = []
-lock = threading.Lock()
+connections = {}  # Словарь для хранения подключенных клиентов по их адресам
+lock = asyncio.Lock()
 
 def is_safe_message(message):
-    """
-    Проверяет сообщение на наличие потенциально опасных символов.
-    """
-    # Дополнительный паттерн для поиска управляющих символов (кроме перевода строки и возврата каретки)
-    # а также символов, используемых в bash-инъекциях
-    unsafe_patterns = re.compile(r'[\x00-\x1F;&|`$(){}<>]')
-    if unsafe_patterns.search(message):
-        return False
-    return True
+    unsafe_patterns = re.compile(r'[\x00-\x1F;&|`$(){}<>\\]')
+    return not unsafe_patterns.search(message)
 
-def handle_client(conn, addr):
-    print(f"Подключен новый клиент: {addr}")
-    with lock:
-        connections.append(conn)
+async def handle_client(reader, writer):
+    addr = writer.get_extra_info('peername')
+    logging.info(f"Подключен новый клиент: {addr}")
+    
+    with await lock:
+        connections[addr] = writer
 
     try:
         while True:
-            # Получаем данные от клиента
-            data = conn.recv(1024)
+            data = await reader.read(1024)
             if not data:
                 break
             
             message = data.decode('utf-8').strip()
             
-            # Проверка сообщения на безопасность
             if not is_safe_message(message):
-                print(f"Попытка инъекции команды от {addr}: {message}")
-                conn.sendall("Ваше сообщение содержит запрещенные символы.".encode('utf-8'))
+                logging.warning(f"Попытка инъекции команды от {addr}: {message}")
+                writer.write("Ваше сообщение содержит запрещенные символы.".encode('utf-8'))
+                await writer.drain()
                 continue
             
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            # Формируем сообщение для вывода и пересылки
             formatted_message = f"[{timestamp}] {addr[0]}:{addr[1]}: {message}"
+            
             print(formatted_message)
+            logging.info(formatted_message)
             
             # Пересылаем сообщение всем, кроме отправителя
-            with lock:
-                for client_conn in connections:
-                    if client_conn != conn:
+            with await lock:
+                for client_addr, client_writer in connections.items():
+                    if client_addr != addr:
                         try:
-                            client_conn.sendall(formatted_message.encode('utf-8'))
+                            client_writer.write(formatted_message.encode('utf-8'))
+                            await client_writer.drain()
                         except (ConnectionResetError, BrokenPipeError):
-                            # Логируем ошибки
-                            logging.error(f"Ошибка при отправке сообщения клиенту {client_conn.getpeername()}: {formatted_message}")
-                            continue
-    except (ConnectionResetError, BrokenPipeError) as e:
-        # Логируем отключения и другие ошибки
-        logging.error(f"Клиент {addr} отключился или произошла ошибка: {e}")
+                            logging.error(f"Ошибка при отправке сообщения клиенту {client_addr}")
+
+    except (ConnectionResetError, asyncio.exceptions.IncompleteReadError):
+        pass
     finally:
-        with lock:
-            if conn in connections:
-                connections.remove(conn)
-            print(f"Клиент {addr} отключился.")
-        conn.close()
+        with await lock:
+            if addr in connections:
+                del connections[addr]
+            logging.info(f"Клиент {addr} отключился.")
+        writer.close()
+        await writer.wait_closed()
 
-def run_server():
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind((HOST, PORT))
-            s.listen()
-            print(f"Сервер чата запущен на {HOST}:{PORT}")
-            print("Ожидаем подключения клиентов...")
+async def run_server():
+    server = await asyncio.start_server(handle_client, HOST, PORT, family=socket.AF_INET)
+    
+    addr = server.sockets[0].getsockname()
+    print(f"Сервер чата запущен на {addr}")
+    logging.info("Сервер чата запущен.")
+    print("Ожидаем подключения клиентов...")
 
-            while True:
-                conn, addr = s.accept()
-                thread = threading.Thread(target=handle_client, args=(conn, addr))
-                thread.daemon = True
-                thread.start()
-    except Exception as e:
-        logging.critical(f"Критическая ошибка сервера: {e}")
+    async with server:
+        await server.serve_forever()
 
 if __name__ == "__main__":
-    run_server()
+    asyncio.run(run_server())
