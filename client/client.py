@@ -4,7 +4,7 @@ import time
 import socket
 
 # Хост и порт для подключения к серверу
-HOST = '127.0.0.1'
+HOST = '64.188.68.161'
 PORT = 65432
 
 async def receive_messages(reader):
