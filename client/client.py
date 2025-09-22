@@ -1,5 +1,7 @@
 import socket
 import threading
+import sys
+import os
 
 HOST = '64.188.68.161'
 PORT = 65432
@@ -9,11 +11,20 @@ def receive_messages(s):
     while True:
         try:
             data = s.recv(1024)
-            if data:
-                print(f"\nСообщение: {data.decode('utf-8')}")
-            else:
+            if not data:
                 print("Сервер отключен.")
                 break
+            
+            message = data.decode('utf-8')
+            
+            # Очистка текущей строки и вывод сообщения
+            sys.stdout.write('\r' + ' ' * len(sys.stdout.readline()) + '\r')
+            sys.stdout.write(f"\r{message}\n")
+            
+            # Перерисовка приглашения для ввода
+            sys.stdout.write(">> ")
+            sys.stdout.flush()
+        
         except (ConnectionResetError, BrokenPipeError):
             print("Соединение с сервером потеряно.")
             break
@@ -31,7 +42,7 @@ def run_client():
             receive_thread.start()
 
             while True:
-                message = input("") 
+                message = input(">> ") 
                 if message.lower() == 'exit':
                     break
                 s.sendall(message.encode('utf-8'))

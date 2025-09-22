@@ -18,8 +18,9 @@ def is_safe_message(message):
     """
     Проверяет сообщение на наличие потенциально опасных символов.
     """
-    # Паттерн для поиска опасных символов, используемых в bash-инъекциях
-    unsafe_patterns = re.compile(r'[;&|`$(){}<>]')
+    # Дополнительный паттерн для поиска управляющих символов (кроме перевода строки и возврата каретки)
+    # а также символов, используемых в bash-инъекциях
+    unsafe_patterns = re.compile(r'[\x00-\x1F;&|`$(){}<>]')
     if unsafe_patterns.search(message):
         return False
     return True
@@ -40,7 +41,7 @@ def handle_client(conn, addr):
             
             # Проверка сообщения на безопасность
             if not is_safe_message(message):
-                print(f"Попытка инъекции команды от {addr}")
+                print(f"Попытка инъекции команды от {addr}: {message}")
                 conn.sendall("Ваше сообщение содержит запрещенные символы.".encode('utf-8'))
                 continue
             
