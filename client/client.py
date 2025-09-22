@@ -1,69 +1,59 @@
-import asyncio
-import sys
-import time
 import socket
+import threading
+import time
+import uuid
 
-# Хост и порт для подключения к серверу
-HOST = '64.188.68.161'
-PORT = 65432
+# --- Клиентская сторона ---
+# Роль клиента — отправлять и получать сообщения, используя общий секрет.
 
-async def receive_messages(reader):
-    """Асинхронный поток для приёма сообщений от сервера."""
-    try:
-        while True:
-            data = await reader.read(1024)
-            if not data:
-                print("\nСервер отключился.")
-                break
-            
-            message = data.decode('utf-8', errors='replace')
-            sys.stdout.write(f"\r{message}\n")
-            sys.stdout.flush()
+SERVER_HOST = '127.0.0.1'
+SERVER_PORT = 65432
 
-    except asyncio.exceptions.IncompleteReadError:
-        pass
-    except Exception as e:
-        print(f"\nПроизошла ошибка при получении сообщения: {e}")
+def listen_for_messages(secret):
+    # Клиент постоянно проверяет "очереди" на сервере
+    # (в этом примере мы используем in-memory словарь)
+    while True:
+        # Эту часть кода нужно было бы написать на сервере в реальном приложении.
+        # Здесь она находится для демонстрации механики.
+        global message_queues, queue_lock
+        with queue_lock:
+            if secret in message_queues and message_queues[secret]:
+                encrypted_message = message_queues[secret].pop(0)
+                # В реальном приложении вы бы расшифровали сообщение здесь
+                print(f"Клиент: Получено сообщение для секрета {secret}: {encrypted_message.decode('utf-8')}")
 
-async def send_messages(writer, name):
-    """Асинхронный поток для отправки сообщений на сервер."""
-    try:
-        writer.write(f"NAME:{name}".encode('utf-8'))
-        await writer.drain()
-        
-        while True:
-            user_input = await asyncio.get_event_loop().run_in_executor(None, sys.stdin.readline)
-            
-            if user_input.lower().strip() == 'exit':
-                print("Отключение от чата.")
-                writer.close()
-                await writer.wait_closed()
-                break
-            
-            writer.write(user_input.encode('utf-8'))
-            await writer.drain()
-            
-    except Exception as e:
-        print(f"Ошибка при отправке сообщения: {e}")
+        time.sleep(1) # Проверяем наличие сообщений каждую секунду
 
-async def run_client():
-    name = input("Введите ваше имя: ")
-    try:
-        reader, writer = await asyncio.open_connection(HOST, PORT)
-        print("Подключен к чату. Начните общение.")
-        print("Чтобы выйти, введите 'exit'.")
-        sys.stdout.write("")
-        sys.stdout.flush()
+def start_client():
+    my_secret = input("Введите ваш секретный ключ (или нажмите Enter, чтобы сгенерировать новый): ")
+    if not my_secret:
+        my_secret = str(uuid.uuid4())[:8]
+        print(f"Сгенерирован новый секрет: {my_secret}")
 
-        receive_task = asyncio.create_task(receive_messages(reader))
-        send_task = asyncio.create_task(send_messages(writer, name))
-        
-        await asyncio.gather(receive_task, send_task)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.connect((SERVER_HOST, SERVER_PORT))
+            s.sendall(my_secret.encode('utf-8'))
+            print(f"Клиент: Подключён к серверу с секретом: {my_secret}")
 
-    except ConnectionRefusedError:
-        print("Ошибка: Не удалось подключиться к серверу. Убедитесь, что сервер запущен.")
-    except Exception as e:
-        print(f"Произошла критическая ошибка: {e}")
+            # Запускаем поток для прослушивания входящих сообщений
+            listen_thread = threading.Thread(target=listen_for_messages, args=(my_secret,))
+            listen_thread.daemon = True
+            listen_thread.start()
+
+            while True:
+                user_input = input("")
+                if user_input.lower() == 'exit':
+                    break
+
+                # Шифруем сообщение перед отправкой (здесь это простая кодировка)
+                encrypted_message = user_input.encode('utf-8')
+                s.sendall(encrypted_message)
+
+        except ConnectionRefusedError:
+            print("Клиент: Ошибка! Не удалось подключиться к серверу.")
+        except Exception as e:
+            print(f"Клиент: Произошла ошибка: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(run_client())
+    start_client()
